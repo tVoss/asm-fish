@@ -120,7 +120,7 @@ mp1_ioctl_add:
 
     movw ON_LENGTH(%ebx), %ax   # on_length ->
     movw %ax, COUNTDOWN(%ebx)   # countdown
-    movb $1, STATUS(%ebx)       # status = 1
+    movw $1, STATUS(%ebx)       # status = 1
 
     movl mp1_list_head, %edx    # Take head of the list
     movl %edx, NEXT(%ebx)       # Assign it to next node
@@ -281,7 +281,7 @@ mp1_ioctl_sync:
     movw STATUS(%esi), %dx      # Copy Status
     movw %dx, STATUS(%edi)
 
-    notw %dx                        # Flip status
+    xorw $1, %dx                    # Flip status
     movb ON_CHAR(%edi, %edx), %cl   # Grab char
     movl $0, %eax                   # Clear eax
     movw LOCATION(%edi), %ax        # Grab location

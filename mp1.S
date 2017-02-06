@@ -156,15 +156,30 @@ mp1_ioctl_remove:
 
     pushl %ebx
 
-    movl mp1_list_head, %ebx
+    movl 8(%ebp), %edx          # Get location to remove
+    leal mp1_list_head, %eax    # Address of next pointer
+    movl mp1_list_head, %ebx    # Get the first element
 
     r_walk:
-        cmpl $0, %ebx
-        jz end_r_walk
+        cmpl $0, %ebx               # If null
+        je remove_error             # Error out
+        cmpw LOCATION(%ebx), %dx    # Check location
+        je r_found                  # If match operate on it
+        leal NEXT(%ebx), %eax       # Pointer to next node
+        movl NEXT(%ebx), %ebx       # Next node
+        jmp r_walk                  # Loop
 
-    end_r_walk:
+    r_found:
+    movl NEXT(%ebx), %ecx       # Get address of next node
+    movl %ecx, (%eax)           # Point prev node to next
+    pushl %ebx                  # Push pointer to node
+    call mp1_free               # free it
+    popl %ebx                   # pop it
+    movl $0, %eax               # set ok error code
+    jmp remove_done
 
     remove_error:
+    movl $-1, %eax              # No element was found
 
     remove_done:
     popl %ebx
@@ -173,10 +188,119 @@ mp1_ioctl_remove:
 	ret
 
 mp1_ioctl_find:
+    # eax Return
+    # ebx Current node
+    # ecx Location
+    # edx Reference node
+    pushl %ebp
+    movl %esp, %ebp
+
+    pushl %ebx
+
+    movl 8(%ebp), %edx          # Get reference element
+    cmpl $0, %edx               # See if it's null
+    jz f_done                   # Finish if it is
+    movw LOCATION(%edx), %cx    # Hold on to location
+    movl mp1_list_head, %ebx    # Get the first element
+
+    f_walk:
+        cmpl $0, %ebx               # See if pointer is null
+        je f_error                  # If so error out
+        cmpw LOCATION(%ebx), %cx    # Compare to reference location
+        je f_found                  # If equal handle it
+        movl NEXT(%ebx), %ebx   # Otherwise move to next node
+        jmp f_walk                  # Loop
+
+    f_found:
+        pushl $STRUCT_SIZE
+        pushl %ebx
+        pushl %edx
+        call mp1_copy_to_user
+        addl $12, %esp              # Clear args off frame
+        cmpl $0, %eax               # Test if result is 0
+        jne f_error                 # Error out if not
+        movl $0, %eax               # Set return value to 0
+        jmp f_done
+
+    f_error:
+    movl $-1, %eax
+
+    f_done:
+    popl %ebx
+
+    leave
 	ret
 
 mp1_ioctl_sync:
-	ret
+    pushl %ebp
+    movl %esp, %ebp
+
+    pushl %ebx                  # Save register
+    pushl %esi
+    pushl %edi
+
+    movw 8(%ebp), %di           # Get source and dest location
+    movw 10(%ebp), %si
+
+    movl mp1_list_head, %ebx    # Start at head of list
+
+    s_walk_s:
+        cmpl $0, %ebx               # See if node is nul
+        je s_error                  # Error out if so
+        cmpw LOCATION(%ebx), %si    # See if location mathes source
+        je s_found                  # Handle it if so
+        movl NEXT(%ebx), %ebx       # Otherwise go to next node
+        jmp s_walk_s                # Loop
+
+    s_found:
+    movl %ebx, %esi             # Move address in ebx to source reg
+    movl mp1_list_head, %ebx    # Restart for destination
+
+    s_walk_d:                       # Same loop as source
+        cmpl $0, %ebx
+        je s_error
+        cmpw LOCATION(%ebx), %di
+        je d_found
+        movl NEXT(%ebx), %ebx
+        jmp s_walk_d
+
+    d_found:
+    movl %ebx, %edi             # Move address in ebx to dest reg
+
+    movl $0, %edx               # Clear edx
+
+    movw ON_LENGTH(%esi), %dx   # Copy on length
+    movw %dx, ON_LENGTH(%edi)
+
+    movw OFF_LENGTH(%esi), %dx  # Copy off length
+    movw %dx, OFF_LENGTH(%edi)
+
+    movw COUNTDOWN(%esi), %dx   # Copy Countdown
+    movw %dx, COUNTDOWN(%edi)
+
+    movw STATUS(%esi), %dx      # Copy Status
+    movw %dx, STATUS(%edi)
+
+    notw %dx                        # Flip status
+    movb ON_CHAR(%edi, %edx), %cl   # Grab char
+    movl $0, %eax                   # Clear eax
+    movw LOCATION(%edi), %ax        # Grab location
+    shlw %ax                        # x2
+    call mp1_poke
+
+    movl $0, %eax                   # Set ok error code
+    jmp s_done
+
+    s_error:
+    movl $-1, %eax
+
+    s_done:
+    popl %edi
+    popl %esi
+    popl %ebx
+
+    leave
+    ret
 
 ioctl_table:
 .long mp1_ioctl_add, mp1_ioctl_remove, mp1_ioctl_find, mp1_ioctl_sync

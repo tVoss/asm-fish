@@ -47,26 +47,27 @@ mp1_rtc_tasklet:
     pushl %ebx                      # Save registers
     pushl %esi
 
-    xor %eax, %eax                  # Clear out eax
-    xor %edx, %edx
+    xorl %eax, %eax                  # Clear out eax
+    xorl %edx, %edx
 
     movl mp1_list_head, %ebx        # Set ebx to head of the list
 
     walk:
-        testl %ebx, %ebx                # If pointer is null break out of loop
-        jz end_walk
-        sub $1, COUNTDOWN(%ebx)         # Decrement counter
+        cmpl $0, %ebx                # If pointer is null break out of loop
+        je end_walk
+        subw $1, COUNTDOWN(%ebx)         # Decrement counter
         jnz no_poke
             xor %edx, %edx                  # Clear out edx
             movw STATUS(%ebx), %dx           # Grab status and put it in edx
-            movb ON_CHAR(%ebx, %edx), %cl   # Swaps char and puts it in cl
+            movb ON_CHAR(%ebx, %edx, 1), %cl   # Swaps char and puts it in cl
             movw LOCATION(%ebx), %ax         # Moves location to eax
+            shlw $1, %ax
             pushl %edx
             call mp1_poke                   # edx gets clobbered
             popl %edx
             movw ON_LENGTH(%ebx, %edx, 2), %ax
             movw %ax, COUNTDOWN(%ebx)        # Puts appropriate length in place
-            xor $1, STATUS(%ebx)            # Flip status
+            xorw $1, STATUS(%ebx)            # Flip status
         no_poke:
         movl NEXT(%ebx), %ebx           # Reassign next pointer
         jmp walk
@@ -80,7 +81,7 @@ mp1_rtc_tasklet:
 
 mp1_ioctl:
     movl 8(%esp), %eax          # Get command number
-    cmp $3, %eax                # Check if number is greater than 3
+    cmpl $3, %eax                # Check if number is greater than 3
     ja error                    # If it is jump to error
     jmp *ioctl_table(, %eax, 4) # Otherwise jump to functionality
     error:
@@ -93,15 +94,15 @@ mp1_ioctl_add:
     pushl %ebp
     movl %esp, %ebp
 
-    cmp $0, 8(%ebp)            # Test if arg is a nullptr
+    cmpl $0, 8(%ebp)            # Test if arg is a nullptr
     je add_error
 
     pushl %ebx
 
     pushl $STRUCT_SIZE          # Allocate space for struct
     call mp1_malloc             # malloc
-    add $4, %esp                # Clear arg off frame
-    cmp $0, %eax                # Test if result is null
+    addl $4, %esp                # Clear arg off frame
+    cmpl $0, %eax                # Test if result is null
     je add_error                # Error out if so
 
     movl %eax, %ebx             # Save location of struct
@@ -110,8 +111,8 @@ mp1_ioctl_add:
     pushl 8(%ebp)               # void *from
     pushl %ebx                  # void *to
     call mp1_copy_from_user     # memcpy
-    add $12, %esp               # Clear args off frame
-    cmp $0, %eax                # Test if result is 0
+    addl $12, %esp               # Clear args off frame
+    cmpl $0, %eax                # Test if result is 0
     jne add_error_free          # Error out if not
 
     cmpw $1999, LOCATION(%ebx)  # Check if value is within valid range
@@ -119,22 +120,25 @@ mp1_ioctl_add:
 
     movw ON_LENGTH(%ebx), %ax   # on_length ->
     movw %ax, COUNTDOWN(%ebx)   # countdown
-    movw $1, STATUS(%ebx)       # status = 1
+    movb $1, STATUS(%ebx)       # status = 1
 
     movl mp1_list_head, %edx    # Take head of the list
     movl %edx, NEXT(%ebx)       # Assign it to next node
     movl %ebx, mp1_list_head    # Put this node at head
 
-    movw LOCATION(%ebx), %ax   # offset
+    movw LOCATION(%ebx), %ax    # offset
+    shlw $1, %ax                # x2 (2 bytes per location)
     movb ON_CHAR(%ebx), %cl     # char
     call mp1_poke               # poke
+
+    jmp add_done                # skip error code
 
     add_error_free:
     pushl %ebx                  # void *ptr
     call mp1_free               # free
-    add $4, %esp                # Clear arg off frame
+    addl $4, %esp                # Clear arg off frame
 
-    xor %eax, %eax
+    xorl %eax, %eax
     jmp add_done
 
     add_error:
@@ -155,6 +159,9 @@ mp1_ioctl_remove:
     movl mp1_list_head, %ebx
 
     r_walk:
+        cmpl $0, %ebx
+        jz end_r_walk
+
     end_r_walk:
 
     remove_error:
